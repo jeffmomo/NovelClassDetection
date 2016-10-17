@@ -1,10 +1,12 @@
+import Helpers._
+
 /**
   * Created by jeffmo on 16/10/16.
   */
 object RecordReader {
 
 
-  case class Record(data: Array[Double], label: Double)
+  case class Record(data: RecordData, label: Label)
 
 
 
