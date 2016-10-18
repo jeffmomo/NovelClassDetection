@@ -1,3 +1,7 @@
+import Classifiers.Ensemble
+import Helpers.{OUTTH, RecordData}
+import RecordReader.Record
+
 /**
   * Created by jeffmo on 16/10/16.
   */
@@ -23,19 +27,50 @@
 object Main {
   def main(args: Array[String]): Unit = {
 
-    RecordReader.getRecords("memes.csv")
+    val records = RecordReader.getRecords("covtype.data")
+
+    assert(records.length > 0)
+
+    normalise_mutable(records)
+
+
+
+//    val reordered = records.sortBy((a) => a.data(0))
+//    val reordered = new DepletingRandomiser(records.length).map((idx) => records(idx)).toArray
+    val reordered = records
+
+    implicit val outth = new OUTTH(0.7, 0.01, 10, false)
+    Evaluator.evaluateEnsemble(reordered, new Ensemble(6), 1000)
+
+
+
 
 
 
   }
 
 
-  def doStuff(): Unit = {
+  def normalise_mutable(records: Array[Record]): Unit = {
+    val dimensions = records(0).data.length
 
+    val (mins, maxes) = records.foldRight((new RecordData(dimensions), new RecordData(dimensions)))((a, accum) => {
+      val (mins, maxes) = accum
+      for (i <- a.data.indices) {
+        mins(i) = Math.min(mins(i), a.data(i))
+        maxes(i) = Math.max(maxes(i), a.data(i))
+      }
+      (mins, maxes)
+    })
+    val ranges = for (i <- mins.indices) yield maxes(i) - mins(i)
 
-
-
-
+    // normalise records
+    records.par.foreach({
+      case Record(d, l) => {
+        for (i <- d.indices if ranges(i) != 0) {
+          d(i) = (d(i) - mins(i)) / ranges(i)
+          assert(d(i) <= 1 && d(i) >= 0)
+        }
+      }
+    })
   }
-
 }

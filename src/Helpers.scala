@@ -1,3 +1,5 @@
+import RecordReader.Record
+
 import scala.collection.mutable.ArrayBuffer
 
 /**
@@ -5,10 +7,36 @@ import scala.collection.mutable.ArrayBuffer
   */
 object Helpers {
 
+
+
   trait DistanceMetric {
     def distance(a: RecordData, b: RecordData): Double
     // a == b -> 0
     // d(a, b) == d(b, a)
+  }
+
+  class OUTTH(initial: Double = 0.7, epsilon: Double, comparisonEpsilon: Double, clamp: Boolean = true) {
+
+    var value = initial
+    var eps = epsilon
+
+    val compEps = comparisonEpsilon
+
+    def adjustFalseNovel(weight: Double): Unit = {
+      assert(weight < value)
+
+      // increase slack space
+      if(value - weight < comparisonEpsilon)
+        value -= epsilon
+    }
+
+
+    def adjustFalseExisting(): Unit = {
+      value += eps
+
+      if(clamp && value > 1)
+        value = 1
+    }
   }
 
 
@@ -43,9 +71,10 @@ object Helpers {
   }
 
 
-  def qSNC(q: Int, x:RecordData, outliers: Array[RecordData], existing: Array[RecordData])(implicit metric:DistanceMetric): Double = {
+  def qSNC(q: Int, x:Record, outliers: Array[Record], existing: Array[Record])(implicit metric:DistanceMetric): Double = {
 
     assert(outliers.length >= q && existing.length >= q)
+//    assert(outliers.length + existing.length >= 1)
 
     val outlierDistance = getQMeanDistance(q, x, outliers)
     val existingClassDistance = getQMeanDistance(q, x, existing)
@@ -53,10 +82,10 @@ object Helpers {
     (existingClassDistance - outlierDistance) / (existingClassDistance max outlierDistance)
   }
 
-  private def getQMeanDistance(q:Int, x:RecordData, records:Array[RecordData])(implicit metric:DistanceMetric): Double = {
-    val distances = records.map(metric.distance(_, x)).sorted
+  private def getQMeanDistance(q:Int, x:Record, records:Array[Record])(implicit metric:DistanceMetric): Double = {
+    val distances = records.map((a) => metric.distance(x.data, a.data)).sorted
 
-    (for(i <- 0 until q) yield distances(i)).sum / q
+    (for(i <- 0 until (q min records.length)) yield distances(i)).sum / q
   }
 
 

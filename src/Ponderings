@@ -1,0 +1,9 @@
+Merging of connected components - at III.C
+---
+Components merged without regards to how well the clustering would be if they were merged compared to if they weren't merged.
+
+
+
+
+
+Calculating gini before computing the kMeans. Some classes may be removed before they could be clustered ?
