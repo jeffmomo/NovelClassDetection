@@ -167,34 +167,58 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
       })
 
     var changed = true
-    val connectedComponents = graph.findConnectedComponents()
+    var connectedComponents = graph.findConnectedComponents()
 
     while(changed) {
 
       changed = false
 
+      val removeList = new ArrayBuffer[mutable.Set[RecordData]]()
+
       breakable {
-        for (a <- connectedComponents; b <- connectedComponents if a != b && !changed) {
-          val aMetrics = getCentroidDistance(a)
-          val bMetrics = getCentroidDistance(b)
 
-          if (aMetrics._2 + bMetrics._2 > 2 * metric.distance(aMetrics._1, bMetrics._1)) {
-            changed = true
 
-            a ++= (b)
-            val success = connectedComponents.remove(b)
-            assert(!connectedComponents.contains(b) && success)
-            break
+//        val removallist = new ArrayBuffer[mutable.Set[RecordData]]()
+//        connectedComponents.foreach(z => {
+//          val zzz = connectedComponents.contains(z)
+//          removallist += z
+//          println(zzz)
+//        })
+//        removallist.foreach(z => connectedComponents.remove(z))
+//
+//        val filtered = connectedComponents.filter((z) => !removallist.contains(z))
+//
+//        println(connectedComponents.size)
+
+
+        for (a <- connectedComponents) {
+          for(b <- connectedComponents if a != b) {
+
+            val aMetrics = getCentroidDistance(a)
+            val bMetrics = getCentroidDistance(b)
+
+            if (aMetrics._2 + bMetrics._2 > 2 * metric.distance(aMetrics._1, bMetrics._1)) {
+              changed = true
+
+              a ++= (b)
+
+              removeList.append(b)
+              break
+            }
           }
         }
       }
+
+      connectedComponents = connectedComponents.filterNot((c) => removeList.contains(c))
+      removeList.clear()
+
     }
 
     connectedComponents
   }
 
-  private def getCentroidDistance(component: mutable.Set[RecordData]): (RecordData, Double) = {
 
+  private def getCentroidDistance(component: mutable.Set[RecordData]): (RecordData, Double) = {
 
     val summedRecord = Array.fill[Double](component.last.length)(0)
     component.foreach((record) => {

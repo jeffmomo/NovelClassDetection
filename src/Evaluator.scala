@@ -18,6 +18,11 @@ object Evaluator {
     var novelDetected = 0
     var totalNovel = 0
 
+    var TP = 0
+    var FP = 0
+    var FN = 0
+    var TN = 0
+
     implicit val metric = EuclideanDistance
 
     val novelClassDetector = new NovelClassDetector(classifier)
@@ -58,6 +63,8 @@ object Evaluator {
           // adjust outth depending on if it is real novel
           if(ensembleLabels.contains(sample.label)) {
             outth.adjustFalseNovel(weight)
+          } else {
+
           }
 
           if(f_outliersBuffer.length >= novelClassThreshold) {
@@ -89,11 +96,35 @@ object Evaluator {
               // classify the discarded outliers
               if (classifier.classify(sample.data) == sample.label)
                 numCorrect += 1
+
+              if(!ensembleLabels.contains(sample.label)) {
+//                outth.adjustFalseExisting()
+                // novel as existing
+                FN += 1
+              } else {
+                // existing detected as existing
+                TN += 1
+              }
+
             }
             if(outliers.nonEmpty) {
+
+              outliers.foreach((a) => {
+                if(ensembleLabels.contains(a.label)) {
+                  FP += 1
+//                  outth.adjustFalseNovel(weight)
+                } else {
+                  TP += 1
+                }
+              })
+
               val classified = novelClassDetector.classifyItems(outliers.map(_.data))
               println(s"Novel classes detected: ${classified.size}")
+
+              assert(classified.size == outliers.length)
+
               novelDetected += classified.size
+
             }
 
 
@@ -104,8 +135,14 @@ object Evaluator {
           chunkTotal += 1
 
           // adjust outth if sample is false existing
+          // If novel class is not detected
           if(!ensembleLabels.contains(sample.label)) {
             outth.adjustFalseExisting()
+            // novel as existing
+            FN += 1
+          } else {
+            // existing detected as existing
+            TN += 1
           }
 
 
@@ -122,6 +159,8 @@ object Evaluator {
       println("total novel", totalNovel, "detectedNovel", novelDetected)
       println("accuracy on chunk", chunkCorrect / chunkTotal.toDouble)
       println("total accuracy", numCorrect / numTotal.toDouble)
+      println("fraction novels detected", TP.toDouble / (TP + FN))
+      println("fraction falsly identified as novel", TN.toDouble / (TN + FP))
 
       numCorrect += chunkCorrect
       numTotal += chunkTotal

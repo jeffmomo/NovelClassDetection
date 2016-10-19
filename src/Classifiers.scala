@@ -1,8 +1,12 @@
+import java.util.function.BiConsumer
+
 import Helpers._
 import RecordReader.Record
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+
+import scala.collection.JavaConversions._
 
 /**
   * Created by jeffmo on 17/10/16.
@@ -72,24 +76,32 @@ object Classifiers {
     }
 
     def contains(x: RecordData): Boolean = {
-      classifiers.exists(_.contains(x))
+      classifiers.par.exists(_.contains(x))
     }
 
     override def classify(x: RecordData): Label = {
-      val map = new mutable.HashMap[Label, Int]()
+      val map = new java.util.concurrent.ConcurrentHashMap[Label, Int]()
 
-      for(classifier_i <- classifiers) {
+      for(classifier_i <- classifiers.par) {
         val label = classifier_i.classify(x)
 
-        map.update(label, map.getOrElse(label, 0) + 1)
+        map.put(label, map.getOrDefault(label, 0) + 1)
       }
 
       // gets the (label,count) pair with max count (majority vote), then returns the label
-      map.maxBy((a) => a._2)._1
+//      var maxCount = 0
+//      var label = 0.0
+//      for(item: java.util.Map.Entry[Label, Int] <- map.entrySet()) {
+//        if(item.getValue > maxCount) {
+//          maxCount = item.getValue
+//          label = item.getKey
+//        }
+//      }
+      map.maxBy(_._2)._1
     }
 
     def weight(x: RecordData): Double = {
-      val weights = classifiers.map((c) => c.weight(x))
+      val weights = classifiers.par.map((c) => c.weight(x))
       weights.max
 //      throw new NotImplementedError()
 //      -1

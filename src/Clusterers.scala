@@ -54,22 +54,23 @@ class Centroid(initial: Record) {
     records.clear()
   }
 
-  def calculateMean(): RecordData = {
-
-
-
+  def calculateMean(): Unit = {
     val output = Array.fill[Double](dimensions)(0)
 
-    if(records.isEmpty)
-      return output
+    if(records.isEmpty) {
+      return
+    }
 
     records.foreach((a) => {
       for(i <- a.data.indices)
         output(i) += a.data(i)
     })
 
-    mean = output.map(_ / records.length)
-    mean
+    for(i <- output.indices) {
+      output(i) = output(i) / records.length
+    }
+
+    mean = output
   }
 
 }
@@ -130,7 +131,7 @@ object Clusterers {
       iterations += 1
     }
 
-    return centroids.par.filter((a) => a.records.nonEmpty).map((a) => {
+    return centroids.filter((a) => a.records.nonEmpty).map((a) => {
       var maxDist = 0.0
       val map = new mutable.HashMap[Label, Int]()
 
@@ -140,7 +141,7 @@ object Clusterers {
       })
 
       Cluster(maxDist, a.mean, map.maxBy((a) => a._2)._1)
-    }).toArray
+    })
 
 
   }
