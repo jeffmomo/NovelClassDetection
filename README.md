@@ -20,7 +20,7 @@ Usage:
 We need to increase the VM memory limits for the forest cover dataset under standard parameters
 
 ```
-scala -J-Xmx4g out.jar dataset=path [order=default|random|altitude_sorted] [normalize=true|false] [outth_clamp=false|true] [kmeans_iters=Integer] [ensemble_size=Integer] [chunk_size=Integer]
+scala -J-Xmx4g out.jar dataset=path [order=default|random|sorted_by_first_col] [normalize=true|false] [outth_clamp=false|true] [kmeans_iters=Integer] [ensemble_size=Integer] [chunk_size=Integer]
 
 # example run
 scala -J-Xmx4g out.jar dataset=covtype.data order=default normalize=true kmeans_iters=100 ensemble_size=6
