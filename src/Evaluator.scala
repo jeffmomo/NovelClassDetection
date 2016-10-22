@@ -2,6 +2,8 @@
   * Created by jeffmo on 17/10/16.
   */
 
+import java.io.PrintWriter
+
 import Classifiers.{Ensemble, KMeansClassifier}
 import Helpers._
 import RecordReader._
@@ -10,11 +12,12 @@ import scala.collection.mutable.ArrayBuffer
 
 object Evaluator {
 
-  def evaluateEnsemble(records: Array[Record], classifier: Ensemble, chunkSize: Int, initialEnsembleSize: Int = 3, novelClassThreshold:Int = 200, q: Int = 50)(implicit outth: OUTTH): Unit = {
+  def evaluateEnsemble(records: Array[Record], classifier: Ensemble, chunkSize: Int, initialEnsembleSize: Int, novelClassThreshold:Int = 50, q: Int = 50, k: Int = 50, kmeansIters: Int)(implicit outth: OUTTH): Unit = {
+
+    val printWriter = Some(new PrintWriter("output.txt"))
 
     var numTotal = 0
     var numCorrect = 0
-
     var novelDetected = 0
     var totalNovel = 0
 
@@ -25,13 +28,12 @@ object Evaluator {
 
     implicit val metric = EuclideanDistance
 
-    val novelClassDetector = new NovelClassDetector(classifier)
+    val novelClassDetector = new NovelClassDetector(classifier, k, chunkSize, q, kmeansIters)
 
-    // do assertations
 
     val initialClassifiers = List.range(0, initialEnsembleSize).map((i) => {
       val datapointsForModel = records.slice(i * 1000, (i + 1) * 1000)
-      KMeansClassifier(Clusterers.KMeans(datapointsForModel, 50), datapointsForModel)
+      KMeansClassifier(Clusterers.KMeans(datapointsForModel, k, kmeansIters), datapointsForModel)
     })
     initialClassifiers.foreach((c) => classifier.addClassifier(c))
 
@@ -39,6 +41,7 @@ object Evaluator {
     var end = start + 1000
 
     val f_outliersBuffer = new ArrayBuffer[(Record, Double)]()
+    val outlierWasNovel = new scala.collection.mutable.HashMap[Record, Boolean]()
 
     while (start < records.length) {
 
@@ -52,42 +55,15 @@ object Evaluator {
 
       for(sample <- currentChunk) {
 
-
         val weight = classifier.weight(sample.data)
         if(weight < outth.value) {
           // weight smaller than OUTTH, so must be novel
 
           f_outliersBuffer += Tuple2(sample, weight)
+          outlierWasNovel.put(sample, !ensembleLabels.contains(sample.label))
 
-
-          // adjust outth depending on if it is real novel
-          if(ensembleLabels.contains(sample.label)) {
-            outth.adjustFalseNovel(weight)
-          } else {
-
-          }
 
           if(f_outliersBuffer.length >= novelClassThreshold) {
-            // now we perform novel class detection
-
-//            val q_count = f_outliersBuffer.count((outlier) => {
-//              classifier.classifiers.forall((clsf) => Helpers.qSNC(q, outlier, f_outliersBuffer.toArray, clsf.records) >= 0)
-//            })
-//
-//            if(q_count > q) {
-//              novelDetected += f_outliersBuffer.length
-//              println(s"Novel classes detected: ${f_outliersBuffer.length}")
-//
-//            } else {
-//              println("novel classes discarded")
-//
-//              for(sample <- f_outliersBuffer) {
-//                // classify the discarded outliers
-//                if (classifier.classify(sample.data) == sample.label)
-//                  numCorrect += 1
-//              }
-//
-//            }
 
             val (inliers, outliers) = novelClassDetector.partitionRealOutliers(f_outliersBuffer.toArray, classifier)
 
@@ -97,41 +73,36 @@ object Evaluator {
               if (classifier.classify(sample.data) == sample.label)
                 numCorrect += 1
 
-              if(!ensembleLabels.contains(sample.label)) {
-//                outth.adjustFalseExisting()
+              assert(outlierWasNovel.contains(sample))
+
+              if(outlierWasNovel(sample)) {
+                outth.adjustFalseExisting()
                 // novel as existing
                 FN += 1
               } else {
                 // existing detected as existing
                 TN += 1
               }
-
-            }
-            if(outliers.nonEmpty) {
-
-              outliers.foreach((a) => {
-                if(ensembleLabels.contains(a.label)) {
-                  FP += 1
-//                  outth.adjustFalseNovel(weight)
-                } else {
-                  TP += 1
-                }
-              })
-
-              val classified = novelClassDetector.classifyItems(outliers.map(_.data))
-              println(s"Novel classes detected: ${classified.size}")
-
-              assert(classified.size == outliers.length)
-
-              novelDetected += classified.size
-
             }
 
+            outliers.foreach((a) => {
+
+              assert(outlierWasNovel.contains(a), "did not keep a novelness history for this particular instance???")
+
+              if(outlierWasNovel(a)) {
+                TP += 1
+              } else {
+                outth.adjustFalseNovel(0)
+                FP += 1
+              }
+            })
 
             f_outliersBuffer.clear()
+            outlierWasNovel.clear()
 
           }
         } else {
+
           chunkTotal += 1
 
           // adjust outth if sample is false existing
@@ -145,92 +116,33 @@ object Evaluator {
             TN += 1
           }
 
-
           if(classifier.classify(sample.data) == sample.label)
             chunkCorrect += 1
         }
-
-        if(!ensembleLabels.contains(sample.label)) {
-          totalNovel += 1
-        }
-
       }
 
-      println("total novel", totalNovel, "detectedNovel", novelDetected)
-      println("accuracy on chunk", chunkCorrect / chunkTotal.toDouble)
-      println("total accuracy", numCorrect / numTotal.toDouble)
-      println("fraction novels detected", TP.toDouble / (TP + FN))
-      println("fraction falsly identified as novel", TN.toDouble / (TN + FP))
+      println("total novel", TP + FN, "detected as Novel", TP + FP)
+      println("fraction falsely identified as existing", FN.toDouble / (TP + FN))
+      println("fraction falsly identified as novel", FP.toDouble / (TN + FP))
+      println("combined error", (FN + FP).toDouble / (FN + FP + TN + TP))
+
+      printWriter match {
+        case Some(p) => p.println(List(TP + FP, TP + FN, FN.toDouble / (TP + FN), FP.toDouble / (TN + FP)).mkString(","))
+      }
 
       numCorrect += chunkCorrect
       numTotal += chunkTotal
 
-
-
-
-
-
-      //  end
-
-//      val classifierSeenLabels = classifier.getLabels()
-//      val groundTruthNovelCount = currentChunk.map(_.label).count((a) => !classifierSeenLabels.contains(a))
-//
-//
-//
-//
-////      val (inliers, outliers) = currentChunk.par.partition((r) => classifier.contains(r.data))
-//      val (inliers, n_list) = novelClassDetector.partitionRealOutliers(currentChunk)
-//
-//
-//
-//      val classified = if(n_list.length > 0) Some(novelClassDetector.classifyItems(n_list.map(_.data))) else None
-//
-//      if(n_list.length > 0) {
-//        //println("Has novel")
-//        val gotten = classified.get
-//
-//        if(gotten.size > groundTruthNovelCount) {
-//
-//          println("false novel detected", gotten.size, "true novel count:", groundTruthNovelCount)
-//          val marginalFalseNovels = n_list.filter((a) => classifierSeenLabels.contains(a.label)).map((a) => classifier.weight(a.data))
-//          //marginalFalseNovels.foreach((a) => outth.adjustFalseNovel(a))
-//
-//        }
-//        else if(gotten.size < groundTruthNovelCount) {
-//          println("fraction detected", gotten.size.toDouble / groundTruthNovelCount, gotten.size)
-//          //(0 until groundTruthNovelCount - gotten.size).foreach((a) => outth.adjustFalseExisting())
-//        }
-//      } else {
-//        if(groundTruthNovelCount > 0)
-//          println("not detected at all:", groundTruthNovelCount)
-//      }
-//
-//      val chunkCorrects = inliers.par.map((record) => {
-//        val classified = classifier.classify(record.data)
-//        val correct = record.label == classified
-//
-//        if (classifier.getLabels().contains(classified)) {
-//
-//        }
-//
-//        correct
-//      })
-//
-//      val (correct, incorrect) = chunkCorrects.foldRight((0, 0))((a, accum) => if (a) (accum._1 + 1, accum._2) else (accum._1, accum._2 + 1))
-//
-//      val thisRoundAccuracy = correct.toDouble / (correct + incorrect)
-//      println("This round:", thisRoundAccuracy)
-//
-//      numCorrect += correct
-//      numTotal += correct + incorrect
-
       start += 1000
       end = (start + 1000) min records.length
 
-      classifier.addClassifier(KMeansClassifier(Clusterers.KMeans(currentChunk, 50), currentChunk))
+      // Add a classifier trained on the new chunk of data
+      classifier.addClassifier(KMeansClassifier(Clusterers.KMeans(currentChunk, k, kmeansIters), currentChunk))
     }
-
     println("Final results", numCorrect.toDouble / numTotal)
+
+    // close printwriter
+    printWriter.foreach(_.close())
   }
 
 }

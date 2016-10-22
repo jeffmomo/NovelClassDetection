@@ -4,6 +4,8 @@
 
 import scala.util.Random
 
+// Returns a random sequence from a pool of Ints up to the max value
+// Used for randomising the order of records
 class DepletingRandomiser(max: Int) extends Traversable[Int] {
 
   override def foreach[U](f: (Int) => U): Unit = {

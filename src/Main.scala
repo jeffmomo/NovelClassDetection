@@ -2,54 +2,60 @@ import Classifiers.Ensemble
 import Helpers.{OUTTH, RecordData}
 import RecordReader.Record
 
-/**
-  * Created by jeffmo on 16/10/16.
-  */
-
-
-
-//Elevation / quantitative /meters / Elevation in meters
-//Aspect / quantitative / azimuth / Aspect in degrees azimuth
-//  Slope / quantitative / degrees / Slope in degrees
-//Horizontal_Distance_To_Hydrology / quantitative / meters / Horz Dist to nearest surface water features
-//Vertical_Distance_To_Hydrology / quantitative / meters / Vert Dist to nearest surface water features
-//Horizontal_Distance_To_Roadways / quantitative / meters / Horz Dist to nearest roadway
-//Hillshade_9am / quantitative / 0 to 255 index / Hillshade index at 9am, summer solstice
-//  Hillshade_Noon / quantitative / 0 to 255 index / Hillshade index at noon, summer soltice
-//  Hillshade_3pm / quantitative / 0 to 255 index / Hillshade index at 3pm, summer solstice
-//  Horizontal_Distance_To_Fire_Points / quantitative / meters / Horz Dist to nearest wildfire ignition points
-//Wilderness_Area (4 binary columns) / qualitative / 0 (absence) or 1 (presence) / Wilderness area designation
-//Soil_Type (40 binary columns) / qualitative / 0 (absence) or 1 (presence) / Soil Type designation
-//Cover_Type (7 types) / integer / 1 to 7 / Forest Cover Type designation
-//
+import scala.util.Try
 
 
 object Main {
   def main(args: Array[String]): Unit = {
-
-    val records = RecordReader.getRecords("covtype.data")
-
-    assert(records.length > 0)
-
-    normalise_mutable(records)
+    // dataset=path [order=default|random|altitude_sorted] [normalize=true|false] [outth_clamp=true|false] kmeans_iters=Int ensemble_size=Int chunk_size=Int
 
 
+    val argsMap = args.foldRight(new scala.collection.mutable.HashMap[String, String]())( {
 
-//    val reordered = records.sortBy((a) => a.data(0))
-//    val reordered = new DepletingRandomiser(records.length).map((idx) => records(idx)).toArray
-    val reordered = records
+      case ("", accum) => accum
+      case (argString, accum) => {
 
-    implicit val outth = new OUTTH(0.7, 0.01, 10, false)
-    Evaluator.evaluateEnsemble(reordered, new Ensemble(6), 1000)
+        val splitted = argString.split("=")
+
+        assert(splitted.length == 2, "arguments are badly formatted. Usage: scala -J-Xmx4g out.jar dataset=path [order=default|random|sorted_by_first_col] [normalize=true|false] [outth_clamp=false|true] [kmeans_iters=Integer] [ensemble_size=Integer] [chunk_size=Integer]")
+
+        accum.put(splitted.head, splitted.last)
+
+        accum
+      }
+    })
+
+    if(argsMap.get("dataset").isEmpty) {
+      println("Usage: scala -J-Xmx4g out.jar dataset=path [order=default|random|sorted_by_first_col] [normalize=true|false] [outth_clamp=false|true] [kmeans_iters=Integer] [ensemble_size=Integer] [chunk_size=Integer]")
+      System.exit(-1)
+    }
 
 
+    def getNumericalArg(key:String, defaultVal: Double): Double = {
+      Try({ argsMap.getOrElse(key, defaultVal.toString).toDouble })
+        .toOption
+        .getOrElse(defaultVal)
+    }
 
+    val records = RecordReader.getRecords(argsMap.getOrElse("dataset", "covtype.data"))
+    assert(records.length > 0, "records must contain at least one line")
 
+    if(argsMap.getOrElse("normalize", "true") == "true")
+      normalise_mutable(records)
 
+    val reordered = argsMap.get("order") match {
+      case Some("default") => records
+      case Some("random") => new DepletingRandomiser(records.length).map((idx) => records(idx)).toArray
+      case Some("sorted_by_first_col") => records.sortBy((a) => a.data(0))
+      case _ => records
+    }
+
+    implicit val outth = new OUTTH(0.7, 0.02, 10, argsMap.getOrElse("outth_clamp", "false") == "true")
+    Evaluator.evaluateEnsemble(reordered, new Ensemble(getNumericalArg("ensemble_size", 6).toInt), getNumericalArg("chunk_size", 1000).toInt, 3, kmeansIters = getNumericalArg("kmeans_iters", 10).toInt)
 
   }
 
-
+  // normalises given recrods to [0, 1]
   def normalise_mutable(records: Array[Record]): Unit = {
     val dimensions = records(0).data.length
 

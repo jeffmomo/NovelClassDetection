@@ -8,77 +8,47 @@ import scala.collection.mutable.ArrayBuffer
 import util.control.Breaks._
 
 //noinspection SpellCheckingInspection
-class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000, q: Int = 50)(implicit outth:OUTTH) {
+class NovelClassDetector(ensemble: Ensemble, k: Int, chunkSize: Int, q: Int, kmeansIters: Int)(implicit outth:OUTTH) {
 
+  // use eucliedean dist as default distance metric
   implicit val metric: DistanceMetric = EuclideanDistance
 
   val numIntervals: Int = 10
   val scThreshold: Double = 0.8
   val floatingpointEpsilon = 0.001
 
-
   type TupleOf_RecordData_Weight_qSNC = (Record, Double, Double)
 
 
   def partitionRealOutliers(f_outlierTuple: Array[(Record, Double)], classifier: Ensemble): (Array[Record], Array[Record]) = {
 
-//    val ensembleLabels = ensemble.getLabels()
-//    val (inlierTuple, f_outlierTuple) =
-//      inputs
-//        .map((a) => {
-//
-//
-//          val output = (a, ensemble.weight(a.data))
-//
-//          if(ensembleLabels.contains(output._1.label))
-//          {
-//            if(output._2 < outth.value)
-//              outth.adjustFalseNovel(output._2)
-//          } else {
-//            if(output._2 > outth.value)
-//              outth.adjustFalseExisting()
-//          }
-//
-//          output
-//        })
-//        .partition((a) => a._2 > 1)
-
     val (f_outliers, f_outlierWeights) = f_outlierTuple.unzip
 
     val (realOutliers: Array[TupleOf_RecordData_Weight_qSNC], filteredOuts) =
       f_outlierTuple
-        .map((outlier) => (outlier._1, outlier._2, classifier.classifiers.map((clsf) => Helpers.qSNC(q, outlier._1, f_outliers, clsf.records)).min))
+        .map((outlier) => (outlier._1, outlier._2, classifier.classifiers.map((clsf) => Helpers.qSNC(q, outlier._1, f_outliers, clsf.records)).max))
         .partition((tuple3) => tuple3._3 >= 0)
 
-
-    //    val (inliers, _) = inlierTuple.unzip
-
-    // assert forall qSNC, qSNC >= 0 && <= 1
 
     // add the filtered out ones to the inlier list
     val inlierBuffer = new ArrayBuffer[Record]() ++= filteredOuts.map(_._1)
 
 
-//    val (realOutliers: Array[TupleOf_RecordData_Weight_qSNC], filteredOuts) =
-//      f_outlierTuple
-//        .map((a) => (a._1, a._2, Helpers.qSNC(q, a._1, f_outliers, inliers)))
-//        .partition((tuple3) => tuple3._3 >= 0)
+    assert(realOutliers.length + inlierBuffer.length == f_outlierTuple.length, "some records were lost....")
 
-
-
-    assert(realOutliers.length + inlierBuffer.length == f_outlierTuple.length)
 
     if(realOutliers.isEmpty)
       return (inlierBuffer.toArray, new Array[Record](0))
 
-    val minWeight = realOutliers.minBy((a) => a._2)._2
+    val minWeight = (realOutliers.minBy((a) => a._2)._2 - floatingpointEpsilon) max 0
     val maxWeight = realOutliers.maxBy(a => a._2)._2
 
 
     // no need to sort actually
     val outliersWithNscoreOrdered = realOutliers.map((a) => (a._1, (maxWeight - a._2) * a._3 / (maxWeight - minWeight))).sortBy((a) => a._2)
 
-    assert(outliersWithNscoreOrdered.forall((v) => v._2 >= 0 && v._2 <= 1))
+    if(!outliersWithNscoreOrdered.forall((v) => v._2 >= 0 && v._2 <= 1))
+      assert(false)
 
     // Binning from min to max? or from 0 to 1
     val minNscore = 0  // outliersWithNscoreOrdered(0)._2
@@ -91,11 +61,11 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
     outliersWithNscoreOrdered.foreach((a) => bins(((a._2 - minNscore) / interval).toInt) += 1)
 
     val sum = bins.sum
-    assert(sum == outliersWithNscoreOrdered.length) // make sure we didnt lose any records
+    assert(sum == outliersWithNscoreOrdered.length, "some records were lost or gained during the proces.......")
 
     val probabilities = bins.map((a) => a / sum.toDouble)
 
-    assert(Math.abs(probabilities.sum - 1) < floatingpointEpsilon) // make sure probabilities are correct
+    assert(Math.abs(probabilities.sum - 1) < floatingpointEpsilon, "probabilities not sum to 1..") // make sure probabilities are correct
 
     var probSum = 0.0
     val cdf = for(i <- probabilities.indices) yield {
@@ -105,9 +75,9 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
 
     val gini = Helpers.gini(cdf)
     if(gini > 0) {
-      if(gini <= (outliersWithNscoreOrdered.length - 1.0) / (3.0 * outliersWithNscoreOrdered.length)) {
+      if(gini <= (numIntervals - 1.0) / (3.0 * numIntervals)) {
         // make sure this is actually the last interval
-        val (outs, ins) = (outliersWithNscoreOrdered partition ((a) => a._2 >= minNscore + interval))
+        val (outs, ins) = outliersWithNscoreOrdered partition ((a) => a._2 >= minNscore + interval)
         inlierBuffer ++= ins map (_._1)
         return (inlierBuffer.toArray, outs.map(_._1))
 
@@ -116,9 +86,8 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
       }
     }
 
-    // All items filtered out
+    // If all items filtered out
     return (inlierBuffer.toArray, new Array[Record](0))
-
   }
 
   def classifyItems(items: Array[RecordData]): mutable.Set[Record] = {
@@ -141,13 +110,13 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
 
   private def buildGraph(items: Array[RecordData]): mutable.Set[mutable.Set[RecordData]] = {
 
-    assert(items.length > 0)
+    assert(items.length > 0, "attempting to build graph with 0 vertices")
 
     // Need to add 1 in so that we have at least 1 cluster
     val k_v = k * items.length / chunkSize + 1
 
     // change RecordData to Record with bogus label
-    val clusters = Clusterers.KMeans(items.map(Record(_, -1.0)), k_v)
+    val clusters = Clusterers.KMeans(items.map(Record(_, -1.0)), k_v, kmeansIters)
 
     val graph = new Graph(new mutable.HashSet[RecordData]() ++= clusters.map(_.centroid))
 
@@ -169,6 +138,8 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
     var changed = true
     var connectedComponents = graph.findConnectedComponents()
 
+    val initSize = connectedComponents.map(_.size).sum
+
     while(changed) {
 
       changed = false
@@ -176,20 +147,6 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
       val removeList = new ArrayBuffer[mutable.Set[RecordData]]()
 
       breakable {
-
-
-//        val removallist = new ArrayBuffer[mutable.Set[RecordData]]()
-//        connectedComponents.foreach(z => {
-//          val zzz = connectedComponents.contains(z)
-//          removallist += z
-//          println(zzz)
-//        })
-//        removallist.foreach(z => connectedComponents.remove(z))
-//
-//        val filtered = connectedComponents.filter((z) => !removallist.contains(z))
-//
-//        println(connectedComponents.size)
-
 
         for (a <- connectedComponents) {
           for(b <- connectedComponents if a != b) {
@@ -200,7 +157,7 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
             if (aMetrics._2 + bMetrics._2 > 2 * metric.distance(aMetrics._1, bMetrics._1)) {
               changed = true
 
-              a ++= (b)
+              a ++= b
 
               removeList.append(b)
               break
@@ -211,9 +168,10 @@ class NovelClassDetector(ensemble: Ensemble, k: Int = 50, chunkSize: Int = 1000,
 
       connectedComponents = connectedComponents.filterNot((c) => removeList.contains(c))
       removeList.clear()
-
     }
 
+
+    assert(connectedComponents.map(_.size).sum == initSize, "umm we have lost records")
     connectedComponents
   }
 

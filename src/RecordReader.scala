@@ -5,11 +5,7 @@ import Helpers._
   */
 object RecordReader {
 
-
-
   case class Record(data: RecordData, label: Label)
-
-
 
   def getRecords(filename: String): Array[Record] = {
 
@@ -18,7 +14,6 @@ object RecordReader {
 
       Record(splitted.slice(0, splitted.length - 1), splitted.last)
     })
-
   }
 
 }

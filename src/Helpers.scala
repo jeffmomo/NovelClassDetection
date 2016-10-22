@@ -15,27 +15,30 @@ object Helpers {
     // d(a, b) == d(b, a)
   }
 
+  // OUTTH class for maintaining the threshould throughout the entire application
   class OUTTH(initial: Double = 0.7, epsilon: Double, comparisonEpsilon: Double, clamp: Boolean = true) {
 
-    var value = initial
-    var eps = epsilon
+    private var threshold = initial
 
+    val eps = epsilon
     val compEps = comparisonEpsilon
 
+    // getter
+    def value = threshold
+
     def adjustFalseNovel(weight: Double): Unit = {
-      assert(weight < value)
+      assert(weight < threshold)
 
       // increase slack space
-      if(value - weight < comparisonEpsilon)
-        value -= epsilon
+      if(threshold - weight < comparisonEpsilon)
+        threshold -= epsilon
     }
 
-
     def adjustFalseExisting(): Unit = {
-      value += eps
+      threshold += eps
 
-      if(clamp && value > 1)
-        value = 1
+      if(clamp && threshold > 1)
+        threshold = 1
     }
   }
 
@@ -43,10 +46,20 @@ object Helpers {
   object EuclideanDistance extends DistanceMetric {
 
     override def distance(a: RecordData, b: RecordData): Double = {
+      assert(a.length == b.length, "records have uneven lengths!?")
 
-      val sumArray = (a zip b) map (tuple => Math.pow(tuple._1 - tuple._2, 2))
+      // java-like for performance
+      var sum = 0.0
+      val max = a.length
+      var idx = 0
+      while(idx < max) {
+        val diff = a(idx) - b(idx)
+        sum += diff * diff
 
-      Math.sqrt(sumArray.sum)
+        idx += 1
+      }
+
+      Math.sqrt(sum)
     }
 
   }
@@ -60,7 +73,6 @@ object Helpers {
       denominatorSum += cdf(i)
     }
 
-
     (cdf.length + 1 - (2 * (numeratorSum / denominatorSum))) / cdf.length
   }
 
@@ -70,11 +82,9 @@ object Helpers {
     residual / (residual max meanDist)
   }
 
-
   def qSNC(q: Int, x:Record, outliers: Array[Record], existing: Array[Record])(implicit metric:DistanceMetric): Double = {
 
-    assert(outliers.length >= q && existing.length >= q)
-//    assert(outliers.length + existing.length >= 1)
+    assert(outliers.length == q && existing.length >= q, "not correct amount of records to calculate QSNC")
 
     val outlierDistance = getQMeanDistance(q, x, outliers)
     val existingClassDistance = getQMeanDistance(q, x, existing)
@@ -89,11 +99,7 @@ object Helpers {
   }
 
 
+  // typedefs
   type RecordData = Array[Double]
   type Label = Double
-
-  implicit class AugmentedRecords(v: IndexedSeq[RecordData]) {
-
-  }
-
 }

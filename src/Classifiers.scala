@@ -17,8 +17,6 @@ object Classifiers {
     def classify(x: RecordData): Label
   }
 
-
-
   case class KMeansClassifier(clusters: Array[Cluster], records: Array[Record])(implicit outth: OUTTH) extends Classifier {
 
     def contains(x: RecordData): Boolean = {
@@ -27,12 +25,17 @@ object Classifiers {
 
     def weight(x: RecordData): Double = {
       val weights = clusters.map((c) => c.weight(x))
+
       weights.max
     }
 
-    def getLabels(): mutable.Set[Label] = {
-      val set = new mutable.HashSet[Label]()
-      clusters.foreach((c) => set += c.label)
+    def getLabels(): mutable.Map[Label, Int] = {
+      val set = new mutable.HashMap[Label, Int]()
+
+      // this defines the meaninig of "Novel Class" - whether it is a label previously passed thorugh a classifier, or a label that is recognised by previous classifiers
+//      clusters.foreach((c) => set += c.label)
+//      records.foreach((r) => set.put(r.label, set.getOrElse(r.label, 0) + 1))
+      clusters.foreach({case Cluster(r, c, l) => set.put(l, set.getOrElse(l, 0) + 1)})
 
       set
     }
@@ -52,25 +55,27 @@ object Classifiers {
 
   class Ensemble(totalClassifiers: Int = 6)(implicit outth: OUTTH) extends Classifier {
 
-    def maxClassifiers = totalClassifiers
-
     val classifiers = new ArrayBuffer[KMeansClassifier]()
+    private val defaultReplacementPolicy = (ensemble: Ensemble, newClsf: KMeansClassifier) => {
+      // This policy replaces earlierst classifier with the new one
+      if(ensemble.classifiers.length + 1 > totalClassifiers)
+        ensemble.classifiers.remove(0)
 
-
-    def addClassifier(x: KMeansClassifier): Unit = {
-
-
-      // delete earliest classifier.
-      if(classifiers.length + 1 > totalClassifiers)
-        classifiers.remove(0)
-
-      classifiers.append(x)
+      ensemble.classifiers.append(newClsf)
     }
 
-    def getLabels(): mutable.Set[Label] = {
-      val set = new mutable.HashSet[Label]()
+    def maxClassifiers = totalClassifiers
 
-      classifiers.foreach((c) => set ++= c.getLabels())
+    def addClassifier(x: KMeansClassifier, replacementPolicy: (Ensemble, KMeansClassifier) => Unit = defaultReplacementPolicy): Unit = {
+      defaultReplacementPolicy(this, x)
+    }
+
+    def getLabels(): mutable.Map[Label, Int] = {
+      val set = new mutable.HashMap[Label, Int]()
+
+      classifiers.foreach((c) => {
+        c.getLabels().foreach((l) => set.put(l._1, set.getOrElse(l._1, 0) + l._2))
+      })
 
       set
     }
@@ -80,6 +85,7 @@ object Classifiers {
     }
 
     override def classify(x: RecordData): Label = {
+      // concurrent hashmap for good multithread performance
       val map = new java.util.concurrent.ConcurrentHashMap[Label, Int]()
 
       for(classifier_i <- classifiers.par) {
@@ -88,23 +94,12 @@ object Classifiers {
         map.put(label, map.getOrDefault(label, 0) + 1)
       }
 
-      // gets the (label,count) pair with max count (majority vote), then returns the label
-//      var maxCount = 0
-//      var label = 0.0
-//      for(item: java.util.Map.Entry[Label, Int] <- map.entrySet()) {
-//        if(item.getValue > maxCount) {
-//          maxCount = item.getValue
-//          label = item.getKey
-//        }
-//      }
       map.maxBy(_._2)._1
     }
 
     def weight(x: RecordData): Double = {
       val weights = classifiers.par.map((c) => c.weight(x))
       weights.max
-//      throw new NotImplementedError()
-//      -1
     }
   }
 
